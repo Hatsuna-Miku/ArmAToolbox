@@ -694,27 +694,23 @@ def possiblyRenumberComponents(obj):
         RenumberComponents(obj)
 
 # Export a couple of meshes to a P3D MLOD files    
-def exportMDL(myself, filePtr, selectedOnly, applyModifiers, mergeSameLOD, renumberComponents, applyTransforms):
-    if selectedOnly:
-        objects = [obj
-                    for obj in bpy.context.selected_objects
-                        if obj.type == 'MESH' and obj.armaObjProps.isArmaObject
-                  ] 
-    else:
-        objects = [obj
-                   for obj in bpy.data.objects
-       
-                       if (selectedOnly == False or obj.selected == True)
-                          and obj.type == 'MESH'
-                          and obj.armaObjProps.isArmaObject
-                  ]
+def exportMDL(myself, fileName, objects, applyModifiers, mergeSameLOD, renumberComponents, applyTransforms):
+
+    objects = [obj
+                for obj in objects
+                    if obj.type == 'MESH'
+                        and obj.armaObjProps.isArmaObject
+                ]
 
     if len(objects) == 0:
         return False
     
+    filePtr = open(fileName, "wb")
     exportObjectListAsMDL(myself, filePtr, applyModifiers,
                           mergeSameLOD, objects, renumberComponents, applyTransforms, None)
 
+    filePtr.close()
+    
     return True
 
 
@@ -723,9 +719,6 @@ def exportObjectListAsMDL(myself, filePtr, applyModifiers, mergeSameLOD, objects
     print("exportObjectListAsMDL: originObject =", originObject)
 
     objects = sorted(objects, key=lodKey)
-
-    # Make sure the object is in OBJECT mode, otherwise some of the functions might fail
-    bpy.ops.object.mode_set(mode='OBJECT')
     
     # Write file header
     writeSignature(filePtr, 'MLOD')
@@ -762,6 +755,13 @@ def exportObjectListAsMDL(myself, filePtr, applyModifiers, mergeSameLOD, objects
         idx = 0
         while  idx < len(objects):
             obj = objects[idx]
+
+            bpy.context.view_layer.objects.active = obj
+
+            # Make sure the object is in OBJECT mode, otherwise some of the functions might fail
+            if (bpy.context.object.mode != 'OBJECT'):
+                bpy.ops.object.mode_set(mode='OBJECT')
+            
             realIndex = idx
             print ("Considering object ", objects[idx].name)
             if sameLod(objects, idx) or hasMeshCollector:
@@ -868,18 +868,13 @@ class ATBX_PT_p3d_export_options(bpy.types.Panel):
 
 class ATBX_OT_p3d_export(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     bl_idname = "armatoolbox.export_p3d"
-    bl_label = "Export as P3D"
-    bl_description = "Export as P3D"
+    bl_label = "Export P3D(s)"
+    bl_description = "Export P3D(s)"
     bl_options = {'PRESET'}
 
     filter_glob: bpy.props.StringProperty(
-        default="*.p3d",
+        default="*",
         options={'HIDDEN'})
-
-    selectionOnly: bpy.props.BoolProperty(
-        name="Selection Only",
-        description="Export selected objects only",
-        default=False)
 
     applyModifiers: bpy.props.BoolProperty(
         name="Apply Modifiers",
@@ -915,61 +910,23 @@ class ATBX_OT_p3d_export(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         default=0
     )
 
-    filename_ext = ".p3d"
+    filename_ext = ""
 
     def draw(self, context):
         pass
 
     def execute(self, context):
+        self.filepath = os.path.split(self.filepath)[0]
 
-        if context.view_layer.objects.active == None:
-            context.view_layer.objects.active = context.view_layer.objects[0]
-        print("CONFIG: " + self.config)
-        if self.config == "-1":
-            self.selectionOnly = True
-            objects = [obj
-                       for obj in bpy.context.selected_objects
-                       if obj.type == 'MESH' and obj.armaObjProps.isArmaObject
-                       ]
-            for o in objects:
-                print("------" + o.name)
-            filePtr = open(self.filepath, "wb")
-            exportObjectListAsMDL(
-                self, filePtr, self.applyModifiers, self.mergeSameLOD, objects, self.renumberComponents, self.applyTransforms, None)
-            filePtr.close()
+        for col in bpy.data.collections:
+            fileName = self.filepath + os.path.sep + col.name + ".p3d"
+            objects = col.all_objects
 
-            ArmaTools.RunO2Script(context, self.filepath)
-        elif self.config == "-2":
             #try:
-            # Open the file and export
-            filePtr = open(self.filepath, "wb")
-            exportMDL(self, filePtr, False,
-                    self.applyModifiers, self.mergeSameLOD, self.renumberComponents, self.applyTransforms)
-            filePtr.close()
-
-            ArmaTools.RunO2Script(context, self.filepath)
-
-            
-        else:
-            print("Export config " + self.config)
-            objs = ArmaTools.GetObjectsByConfig(self.config)
-            print("Config: " + self.config)
-            config = context.scene.armaExportConfigs.exportConfigs[self.config]
-            fileName = self.filepath
-            print("  exporting to " + fileName)
-            try:
-                filePtr = open(fileName, "wb")
-                context.view_layer.objects.active = objs[0]
-                exportObjectListAsMDL(
-                    self, filePtr, self.applyModifiers, True, objs, self.renumberComponents, self.applyTransforms, config.originObject)
-                filePtr.close()
-                ArmaTools.RunO2Script(context, fileName)
-            except:
-                self.report({'ERROR'}, "Error writing file " + fileName +
-                            " for config " + config.name + ":" + str(sys.exc_info()[0]))
-                return {'CANCELLED'}
-            
-        return{'FINISHED'}
+            # Open the file and export 
+            if exportMDL(self, fileName, objects, self.applyModifiers, self.mergeSameLOD) == False:
+                continue
+        ArmaTools.RunO2Script(context, self.filepath)
 
 clses = (
     # Properties
